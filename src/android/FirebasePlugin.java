@@ -13,6 +13,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -154,10 +156,12 @@ public class FirebasePlugin extends CordovaPlugin {
     private static boolean pluginInitialized = false;
     private static boolean onPageFinished = false;
     private static ArrayList<String> pendingGlobalJS = null;
+    private static int retryCount = 0;
 
     protected static final String TAG = "FirebasePlugin";
     protected static final String JS_GLOBAL_NAMESPACE = "FirebasePlugin.";
     protected static final String KEY = "badge";
+    protected static final int MAX_RETRIES = 10;
     protected static final int GOOGLE_SIGN_IN = 0x1;
     protected static final String SETTINGS_NAME = "settings";
     private static final String CRASHLYTICS_COLLECTION_ENABLED = "firebase_crashlytics_collection_enabled";
@@ -4110,6 +4114,18 @@ public class FirebasePlugin extends CordovaPlugin {
     private static class IdTokenListener implements FirebaseAuth.IdTokenListener {
         @Override
         public void onIdTokenChanged(@NonNull FirebaseAuth firebaseAuth) {
+            FirebasePlugin plugin = FirebasePlugin.instance;
+            if (plugin == null) {
+                if (retryCount < MAX_RETRIES) {
+                    Log.w(TAG, "Plugin is not ready, retry " + (retryCount + 1) + "/" + MAX_RETRIES + " after 50ms");
+                    retryCount++;
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> onIdTokenChanged(firebaseAuth), 50);
+                } else {
+                    Log.e(TAG, "Plugin still not initialized after " + MAX_RETRIES + " retries");
+                }
+                return;
+            }
+            retryCount = 0;
             try {
                 FirebaseUser user = firebaseAuth.getCurrentUser();
                 user.getIdToken(true).addOnSuccessListener(new OnSuccessListener<GetTokenResult>() {
