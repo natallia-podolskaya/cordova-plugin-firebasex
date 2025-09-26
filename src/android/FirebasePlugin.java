@@ -156,12 +156,10 @@ public class FirebasePlugin extends CordovaPlugin {
     private static boolean pluginInitialized = false;
     private static boolean onPageFinished = false;
     private static ArrayList<String> pendingGlobalJS = null;
-    private static int retryCount = 0;
-
     protected static final String TAG = "FirebasePlugin";
     protected static final String JS_GLOBAL_NAMESPACE = "FirebasePlugin.";
     protected static final String KEY = "badge";
-    protected static final int MAX_RETRIES = 10;
+    protected static final int ID_TOKEN_NOTIFY_MAX_RETRIES = 10;
     protected static final int GOOGLE_SIGN_IN = 0x1;
     protected static final String SETTINGS_NAME = "settings";
     private static final String CRASHLYTICS_COLLECTION_ENABLED = "firebase_crashlytics_collection_enabled";
@@ -281,7 +279,11 @@ public class FirebasePlugin extends CordovaPlugin {
                     defaultChannelId = getStringResource("default_notification_channel_id");
                     defaultChannelName = getStringResource("default_notification_channel_name");
                     createDefaultChannel();
-                    pluginInitialized = true;                   
+                    pluginInitialized = true;
+                    // If the webview has already reported page finished, flush any pending global JS
+                    if (onPageFinished) {
+                        executePendingGlobalJavascript();
+                    }
 
                 } catch (Exception e) {
                     handleExceptionWithoutContext(e);
@@ -3818,10 +3820,13 @@ public class FirebasePlugin extends CordovaPlugin {
     }
 
     private void executeGlobalJavascript(final String jsString) {
-        if(pluginInitialized && onPageFinished){
+        if (pluginInitialized && onPageFinished) {
             doExecuteGlobalJavascript(jsString);
-        } else {
-            if(pendingGlobalJS == null) {
+            return;
+        }
+
+        synchronized (FirebasePlugin.class) {
+            if (pendingGlobalJS == null) {
                 pendingGlobalJS = new ArrayList<>();
             }
             pendingGlobalJS.add(jsString);
@@ -3829,15 +3834,25 @@ public class FirebasePlugin extends CordovaPlugin {
     }
 
     private void executePendingGlobalJavascript() {
-        if(pendingGlobalJS == null){
-            Log.d(TAG, "No pending global JS calls");
+        if (!pluginInitialized || !onPageFinished) {
+            Log.d(TAG, "Deferring pending global JS: pluginInitialized=" + pluginInitialized + ", onPageFinished=" + onPageFinished);
             return;
         }
-        Log.d(TAG, "Executing "+pendingGlobalJS.size()+" pending global JS calls");
-        for(String jsString : pendingGlobalJS){
+
+        ArrayList<String> toExecute;
+        synchronized (FirebasePlugin.class) {
+            if (pendingGlobalJS == null) {
+                Log.d(TAG, "No pending global JS calls");
+                return;
+            }
+            toExecute = pendingGlobalJS;
+            pendingGlobalJS = null;
+        }
+
+        Log.d(TAG, "Executing " + toExecute.size() + " pending global JS calls");
+        for (String jsString : toExecute) {
             doExecuteGlobalJavascript(jsString);
         }
-        pendingGlobalJS = null;
     }
 
     private void doExecuteGlobalJavascript(final String jsString) {
@@ -3845,7 +3860,20 @@ public class FirebasePlugin extends CordovaPlugin {
         cordovaActivity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                webView.getEngine().evaluateJavascript(jsString, null);
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        webView.getEngine().evaluateJavascript(jsString, null);
+                    } else {
+                        webView.loadUrl("javascript:" + jsString);
+                    }
+                } catch (Throwable t) {
+                    // Fall back to loadUrl if evaluateJavascript fails for any reason
+                    try {
+                        webView.loadUrl("javascript:" + jsString);
+                    } catch (Throwable t2) {
+                        Log.e(TAG, "Failed to execute JS: " + t2.getMessage());
+                    }
+                }
             }
         });
     }
@@ -4112,20 +4140,24 @@ public class FirebasePlugin extends CordovaPlugin {
     }
 
     private static class IdTokenListener implements FirebaseAuth.IdTokenListener {
+        private int idTokenNotifyRetryCount = 0;
         @Override
         public void onIdTokenChanged(@NonNull FirebaseAuth firebaseAuth) {
+            // Use a listener-scoped retry counter so multiple listeners or instances don't share a global budget
             FirebasePlugin plugin = FirebasePlugin.instance;
+
             if (plugin == null) {
-                if (retryCount < MAX_RETRIES) {
-                    Log.w(TAG, "Plugin is not ready, retry " + (retryCount + 1) + "/" + MAX_RETRIES + " after 50ms");
-                    retryCount++;
+                if (this.idTokenNotifyRetryCount < ID_TOKEN_NOTIFY_MAX_RETRIES) {
+                    Log.w(TAG, "Plugin is not ready, retry " + (this.idTokenNotifyRetryCount + 1) + "/" + ID_TOKEN_NOTIFY_MAX_RETRIES + " after 50ms");
+                    this.idTokenNotifyRetryCount++;
                     new Handler(Looper.getMainLooper()).postDelayed(() -> onIdTokenChanged(firebaseAuth), 50);
                 } else {
-                    Log.e(TAG, "Plugin still not initialized after " + MAX_RETRIES + " retries");
+                    Log.e(TAG, "Plugin still not initialized after " + ID_TOKEN_NOTIFY_MAX_RETRIES + " retries");
                 }
                 return;
             }
-            retryCount = 0;
+            // reset retry count on success
+            this.idTokenNotifyRetryCount = 0;
             try {
                 FirebaseUser user = firebaseAuth.getCurrentUser();
                 user.getIdToken(true).addOnSuccessListener(new OnSuccessListener<GetTokenResult>() {
