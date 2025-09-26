@@ -152,6 +152,7 @@ public class FirebasePlugin extends CordovaPlugin {
     protected static Context applicationContext = null;
     private static Activity cordovaActivity = null;
     private static boolean pluginInitialized = false;
+    private static boolean onPageFinished = false;
     private static ArrayList<String> pendingGlobalJS = null;
 
     protected static final String TAG = "FirebasePlugin";
@@ -292,6 +293,7 @@ public class FirebasePlugin extends CordovaPlugin {
         }
         if("onPageFinished".equals(id)){       
             Log.d(TAG, "Page ready init javascript");
+            onPageFinished = true;
             executePendingGlobalJavascript();
             return null;
         }
@@ -3812,7 +3814,7 @@ public class FirebasePlugin extends CordovaPlugin {
     }
 
     private void executeGlobalJavascript(final String jsString) {
-        if(pluginInitialized){
+        if(pluginInitialized && onPageFinished){
             doExecuteGlobalJavascript(jsString);
         } else {
             if(pendingGlobalJS == null) {
@@ -3839,7 +3841,7 @@ public class FirebasePlugin extends CordovaPlugin {
         cordovaActivity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                webView.loadUrl("javascript:" + jsString);
+                webView.getEngine().evaluateJavascript(jsString, null);
             }
         });
     }
