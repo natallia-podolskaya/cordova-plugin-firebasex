@@ -592,11 +592,14 @@ static NSMutableArray* pendingGlobalJS = nil;
 
 - (void)onTokenRefresh:(CDVInvokedUrlCommand *)command {
     self.tokenRefreshCallbackId = command.callbackId;
-    [self _getToken:^(NSString *token, NSError *error) {
-        if(error == nil && token != nil){
-            [self sendToken:token];
-        }
-    }];
+    NSString* apnsToken = [self getAPNSToken];
+    if(apnsToken != nil){
+        [self _getToken:^(NSString *token, NSError *error) {
+            if(error == nil && token != nil){
+                [self sendToken:token];
+            }
+        }];
+    }
 }
 
 - (void)onApnsTokenReceived:(CDVInvokedUrlCommand *)command {
