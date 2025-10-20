@@ -86,12 +86,12 @@ variableApplicators.FIREBASE_ANALYTICS_WITHOUT_ADS = function(){
 }
 
 variableApplicators.IOS_ON_DEVICE_CONVERSION_ANALYTICS = function(){
-    const commentedOutPodRegExp = /<!--<pod name="FirebaseAnalyticsOnDeviceConversion" spec="(\d+\.\d+\.\d+)"\/>-->/,
-        commentedInPattern = `<pod name="FirebaseAnalyticsOnDeviceConversion" spec="$version$"/>`,
+    const commentedOutPodRegExp = /<!--<pod name="GoogleAdsOnDeviceConversion" spec="(\d+\.\d+\.\d+)"\/>-->/,
+        commentedInPattern = `<pod name="GoogleAdsOnDeviceConversion" spec="$version$"/>`,
         match = pluginXmlText.match(commentedOutPodRegExp);
 
     if(!match){
-        console.warn(`Failed to find commented-out <pod name="FirebaseAnalyticsOnDeviceConversion"> in ${PLUGIN_ID}/plugin.xml`);
+        console.warn(`Failed to find commented-out <pod name="GoogleAdsOnDeviceConversion"> in ${PLUGIN_ID}/plugin.xml`);
         return;
     }
     const replacement = commentedInPattern.replace("$version$", match[1]);
